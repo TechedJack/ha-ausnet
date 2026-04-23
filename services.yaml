@@ -1,0 +1,27 @@
+import_csv:
+  name: Import AusNet NEM12 CSV
+  description: Parse a NEM12 CSV and backfill Home Assistant long-term statistics for the Energy dashboard.
+  fields:
+    file_path:
+      required: true
+      example: /config/www/ausnet_nem12.csv
+      selector:
+        text:
+    timezone:
+      required: false
+      default: Australia/Melbourne
+      selector:
+        text:
+    nmi_override:
+      required: false
+      example: "6306004387"
+      selector:
+        text:
+    channel:
+      required: false
+      default: E1
+      selector:
+        select:
+          options:
+            - E1
+            - E2
