@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import datetime as dt
+import io
 import logging
 from collections import defaultdict
 from pathlib import Path
@@ -28,12 +29,6 @@ _LOGGER = logging.getLogger(__name__)
 # 2) Reads 300 rows for that channel.
 # 3) Converts per-interval kWh deltas to hourly kWh by summing intervals per hour.
 # 4) Builds an increasing cumulative `sum` and writes external statistics to HA's Energy dashboard.
-#
-# TODO: Automate data retrieval from myhomeenergy.ausnet.com.au instead of requiring a manual CSV
-#       download. This would require:
-#       - A config flow to securely store user credentials (username / password).
-#       - An aiohttp-based session to authenticate and download the NEM12 file on demand.
-#       - A scheduled coordinator (or on-demand service call) to pull fresh data.
 
 
 def _parse_nem12(
@@ -44,76 +39,95 @@ def _parse_nem12(
 
     desired_channel: "E1" (import) or "E2" (export), or None to accept the first channel found.
     """
+    with file_path.open(newline="") as f:
+        return _parse_nem12_rows(csv.reader(f), desired_channel)
+
+
+def _parse_nem12_text(
+    content: str,
+    desired_channel: str | None = "E1",
+) -> Tuple[str, int, str, Dict[dt.date, List[float]]]:
+    """Parse NEM12 CSV text (string, not a file path).
+
+    Accepts the raw CSV string returned by the portal download endpoint.
+    Same return signature as _parse_nem12.
+    """
+    return _parse_nem12_rows(csv.reader(io.StringIO(content)), desired_channel)
+
+
+def _parse_nem12_rows(
+    reader: csv.reader,  # type: ignore[type-arg]
+    desired_channel: str | None,
+) -> Tuple[str, int, str, Dict[dt.date, List[float]]]:
+    """Core NEM12 parser that operates on an already-open CSV reader."""
     nmi_detected: str | None = None
     interval_len: int | None = None
     unit: str | None = None
     day_values: Dict[dt.date, List[float]] = defaultdict(list)
     current_channel: str | None = None
 
-    with file_path.open(newline="") as f:
-        reader = csv.reader(f)
-        for raw in reader:
-            if not raw or not raw[0].strip():
+    for raw in reader:
+        if not raw or not raw[0].strip():
+            continue
+        rec = raw[0].strip()
+
+        if rec == "200":
+            # NEM12 200 record layout (permissive parsing):
+            #   200,<NMI>,<channel>,<channel>,<channel>,,<MeterSerial>,<Unit>,<IntervalLen>,...
+            try:
+                nmi = raw[1].strip()
+            except IndexError:
                 continue
-            rec = raw[0].strip()
 
-            if rec == "200":
-                # NEM12 200 record layout (permissive parsing):
-                #   200,<NMI>,<channel>,<channel>,<channel>,,<MeterSerial>,<Unit>,<IntervalLen>,...
+            # Channel: first token in columns 2-7 that is E1 or E2
+            ch = None
+            for t in raw[2:8]:
+                t = (t or "").strip()
+                if t in ("E1", "E2"):
+                    ch = t
+                    break
+
+            # Unit: first token anywhere in the row that looks like an energy unit
+            u = None
+            for t in raw:
+                if (t or "").strip().upper() in ("KWH", "WH", "MWH"):
+                    u = (t or "").strip().upper()
+
+            # Interval length (minutes): last numeric field in the row
+            iv = None
+            for t in reversed(raw):
+                t = (t or "").strip()
+                if t.isdigit():
+                    iv = int(t)
+                    break
+
+            if desired_channel is None or ch == desired_channel:
+                current_channel = ch
+                nmi_detected = nmi
+                unit = u or unit
+                interval_len = iv or interval_len
+            else:
+                current_channel = None
+
+        elif rec == "300" and current_channel is not None:
+            # 300 record: 300,YYYYMMDD,<value>,...,<QualityFlag>
+            if len(raw) < 3:
+                continue
+            try:
+                date_str = raw[1].strip()
+                day = dt.date(int(date_str[0:4]), int(date_str[4:6]), int(date_str[6:8]))
+            except Exception:
+                continue
+
+            # Values occupy columns 2..-1 (last column is the quality flag)
+            vals: List[float] = []
+            for t in raw[2:-1]:
+                t = (t or "").strip()
                 try:
-                    nmi = raw[1].strip()
-                except IndexError:
-                    continue
-
-                # Channel: first token in columns 2-7 that is E1 or E2
-                ch = None
-                for t in raw[2:8]:
-                    t = (t or "").strip()
-                    if t in ("E1", "E2"):
-                        ch = t
-                        break
-
-                # Unit: first token anywhere in the row that looks like an energy unit
-                u = None
-                for t in raw:
-                    if (t or "").strip().upper() in ("KWH", "WH", "MWH"):
-                        u = (t or "").strip().upper()
-
-                # Interval length (minutes): last numeric field in the row
-                iv = None
-                for t in reversed(raw):
-                    t = (t or "").strip()
-                    if t.isdigit():
-                        iv = int(t)
-                        break
-
-                if desired_channel is None or ch == desired_channel:
-                    current_channel = ch
-                    nmi_detected = nmi
-                    unit = u or unit
-                    interval_len = iv or interval_len
-                else:
-                    current_channel = None
-
-            elif rec == "300" and current_channel is not None:
-                # 300 record: 300,YYYYMMDD,<value>,...,<QualityFlag>
-                if len(raw) < 3:
-                    continue
-                try:
-                    date_str = raw[1].strip()
-                    day = dt.date(int(date_str[0:4]), int(date_str[4:6]), int(date_str[6:8]))
-                except Exception:
-                    continue
-
-                # Values occupy columns 2..-1 (last column is the quality flag)
-                vals: List[float] = []
-                for t in raw[2:-1]:
-                    t = (t or "").strip()
-                    try:
-                        vals.append(float(t) if t else 0.0)
-                    except ValueError:
-                        vals.append(0.0)
-                day_values[day] = vals
+                    vals.append(float(t) if t else 0.0)
+                except ValueError:
+                    vals.append(0.0)
+            day_values[day] = vals
 
     if nmi_detected is None or interval_len is None or unit is None:
         raise ValueError(

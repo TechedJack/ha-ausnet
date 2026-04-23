@@ -1,11 +1,12 @@
 {
   "domain": "ausnet_myhomeenergy",
-  "name": "AusNet myHomeEnergy (CSV Import)",
-  "version": "0.2.0",
-  "iot_class": "local_push",
+  "name": "AusNet myHomeEnergy",
+  "version": "0.3.0",
+  "config_flow": true,
+  "iot_class": "cloud_polling",
   "documentation": "https://github.com/TechedJack/ha-ausnet",
   "issue_tracker": "https://github.com/TechedJack/ha-ausnet/issues",
   "after_dependencies": ["recorder"],
-  "requirements": [],
+  "requirements": ["pytz>=2023.3"],
   "codeowners": ["@TechedJack"]
 }
