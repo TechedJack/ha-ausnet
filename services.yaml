@@ -1,27 +1,51 @@
 import_csv:
   name: Import AusNet NEM12 CSV
-  description: Parse a NEM12 CSV and backfill Home Assistant long-term statistics for the Energy dashboard.
+  description: >
+    Parse a NEM12 CSV file downloaded from myhomeenergy.ausnet.com.au and backfill
+    Home Assistant long-term statistics for the Energy dashboard.
+    The statistics are written under the domain 'ausnet_myhomeenergy'.
   fields:
     file_path:
+      name: File path
+      description: >
+        Absolute path to the NEM12 CSV file on the Home Assistant host.
+        Place the file somewhere HA can read it, e.g. /config/www/ausnet_nem12.csv.
       required: true
-      example: /config/www/ausnet_nem12.csv
+      example: "/config/www/ausnet_nem12.csv"
       selector:
         text:
     timezone:
+      name: Timezone
+      description: >
+        IANA timezone name for your meter's local time. Defaults to Australia/Melbourne.
+        Other common values: Australia/Sydney, Australia/Brisbane, Australia/Adelaide,
+        Australia/Perth, Australia/Darwin, Australia/Hobart.
       required: false
-      default: Australia/Melbourne
+      default: "Australia/Melbourne"
+      example: "Australia/Melbourne"
       selector:
         text:
     nmi_override:
+      name: NMI override
+      description: >
+        Override the NMI (National Meter Identifier) detected from the CSV.
+        Useful if your CSV contains a masked or incorrect NMI. Leave blank to
+        use the NMI from the file.
       required: false
-      example: "6306004387"
+      example: "6123456789"
       selector:
         text:
     channel:
+      name: Channel
+      description: >
+        Which data channel to import. E1 = electricity consumed (import from grid),
+        E2 = electricity exported (solar feed-in). Defaults to E1.
       required: false
-      default: E1
+      default: "E1"
       selector:
         select:
           options:
-            - E1
-            - E2
+            - label: "E1 – Grid import (consumption)"
+              value: "E1"
+            - label: "E2 – Grid export (solar feed-in)"
+              value: "E2"
