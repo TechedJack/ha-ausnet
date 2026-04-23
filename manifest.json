@@ -1,7 +1,8 @@
 {
   "domain": "ausnet_myhomeenergy",
   "name": "AusNet myHomeEnergy (CSV Import)",
-  "version": "0.1.0",
+  "version": "0.2.0",
+  "iot_class": "local_push",
   "after_dependencies": ["recorder"],
   "requirements": [],
   "codeowners": ["@TechedJack"]
