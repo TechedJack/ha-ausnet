@@ -21,6 +21,10 @@ PORTAL_BASE = "https://myhomeenergy.com.au"
 _LOGIN_URL = f"{PORTAL_BASE}/en"
 _API_BASE = f"{PORTAL_BASE}/api/Sitecore/Dashboard"
 _CHART_URL = "https://www.ausnetservices.com.au/api/Sitecore/Dashboard/GetDataForChart"
+_MY_NMIS_URL = (
+    f"{PORTAL_BASE}/AusNet-Services/Sites/AusNet-Corp-Website"
+    "/Home/myHomeEnergy/Dashboard/My-NMIs"
+)
 
 # Primary NEM12 download endpoint discovered via browser DevTools.
 _START_DOWNLOAD_URL = f"{_API_BASE}/StartDownload"
@@ -177,6 +181,46 @@ class AusNetClient:
             raise
         except aiohttp.ClientConnectionError as exc:
             raise AusNetAuthError(f"Cannot reach myHomeEnergy portal: {exc}") from exc
+
+    # ------------------------------------------------------------------
+    # NMI discovery
+    # ------------------------------------------------------------------
+
+    async def discover_nmi(self) -> str | None:
+        """Scrape the NMI from the portal's My NMIs page after authentication.
+
+        Returns the NMI string, or None if it could not be found.
+        """
+        try:
+            async with self._session.get(_MY_NMIS_URL) as resp:
+                if resp.status != 200:
+                    _LOGGER.debug("NMI discovery page returned HTTP %s", resp.status)
+                    return None
+                html = await resp.text()
+        except aiohttp.ClientError as exc:
+            _LOGGER.debug("NMI discovery request failed: %s", exc)
+            return None
+
+        # Try patterns that Sitecore/AusNet portals commonly use to embed the NMI.
+        # Update these if the portal HTML structure changes.
+        for pattern in [
+            r'customerNMI["\']?\s*[:=]\s*["\']([A-Z0-9]{10,11})',
+            r'data-nmi=["\']([A-Z0-9]{10,11})["\']',
+            r'"NMI"\s*:\s*"([A-Z0-9]{10,11})"',
+            r"'NMI'\s*:\s*'([A-Z0-9]{10,11})'",
+            r'\bNMI[:\s]+([0-9]{10,11})\b',
+            r'CallDownloadHandler[^)]*NMI[^)]*["\']([A-Z0-9]{10,11})["\']',
+        ]:
+            m = re.search(pattern, html, re.I)
+            if m:
+                nmi = m.group(1).upper()
+                _LOGGER.debug("NMI discovery matched pattern %r → %s", pattern, nmi)
+                return nmi
+
+        _LOGGER.debug(
+            "NMI discovery: no pattern matched in page (length %d chars)", len(html)
+        )
+        return None
 
     # ------------------------------------------------------------------
     # NEM12 download

@@ -81,12 +81,24 @@ class AusNetCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     # ------------------------------------------------------------------
 
     async def _ensure_authenticated(self) -> None:
-        if not self._authenticated:
-            if self._session_cookie:
-                await self._client.authenticate_with_cookie(self._session_cookie)
+        if self._authenticated:
+            return
+        if self._session_cookie:
+            await self._client.authenticate_with_cookie(self._session_cookie)
+        else:
+            await self._client.authenticate()
+        self._authenticated = True
+
+        if not self._nmi:
+            discovered = await self._client.discover_nmi()
+            if discovered:
+                self._nmi = discovered
+                _LOGGER.info("AusNet: auto-discovered NMI %s from portal", discovered)
             else:
-                await self._client.authenticate()
-            self._authenticated = True
+                _LOGGER.warning(
+                    "AusNet: NMI not configured and could not be auto-discovered. "
+                    "Set it manually via the integration's Configure option."
+                )
 
     # ------------------------------------------------------------------
     # Statistics helpers
