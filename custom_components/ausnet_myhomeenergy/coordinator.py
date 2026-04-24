@@ -186,7 +186,9 @@ class AusNetCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 if channel == "E2"
                 else STAT_ID_IMPORT.format(nmi=placeholder_nmi)
             )
-            start, end = self._fetch_date_range(stat_id)
+            start, end = await self.hass.async_add_executor_job(
+                self._fetch_date_range, stat_id
+            )
             _LOGGER.debug("AusNet: fetching %s for %s → %s", channel, start, end)
 
             # Download NEM12 CSV; re-authenticate once if the session expired.
