@@ -26,17 +26,8 @@ _MY_NMIS_URL = (
     "/Home/myHomeEnergy/Dashboard/My-NMIs"
 )
 
-# Primary NEM12 download endpoint discovered via browser DevTools.
+# NEM12 download endpoint discovered via browser DevTools.
 _START_DOWNLOAD_URL = f"{_API_BASE}/StartDownload"
-
-# Legacy candidates tried as fallback; the first that returns valid NEM12 content wins.
-_NEM12_CANDIDATES = [
-    f"{_API_BASE}/GetDownloadData",
-    f"{_API_BASE}/DownloadIntervalData",
-    f"{_API_BASE}/GetNEM12Data",
-    f"{_API_BASE}/ExportIntervalData",
-    f"{_API_BASE}/GetDataForDownload",
-]
 
 # How much history to fetch on first sync (days).
 DEFAULT_HISTORY_DAYS = 90
@@ -235,10 +226,8 @@ class AusNetClient:
     ) -> Optional[str]:
         """Attempt to download a NEM12 CSV file for the given NMI and date range.
 
-        Tries each candidate endpoint in order.  Returns the raw CSV text if a
-        valid NEM12 file is found, or ``None`` if all candidates fail.
+        Returns the raw CSV text on success, or ``None`` if the endpoint fails.
         """
-        # Try the confirmed endpoint first.
         try:
             primary_params: dict[str, str] = {
                 "NMI": nmi,
@@ -260,32 +249,6 @@ class AusNetClient:
                     _LOGGER.debug("StartDownload → HTTP %s", resp.status)
         except aiohttp.ClientError as exc:
             _LOGGER.debug("StartDownload error: %s", exc)
-
-        # Fall back to legacy candidates with date-range parameters.
-        legacy_params: dict[str, str] = {
-            "customerNMI": nmi,
-            "startdate": start.strftime("%Y%m%d"),
-            "enddate": end.strftime("%Y%m%d"),
-        }
-        for url in _NEM12_CANDIDATES:
-            try:
-                async with self._session.get(url, params=legacy_params) as resp:
-                    if resp.status != 200:
-                        _LOGGER.debug("NEM12 candidate %s → HTTP %s", url, resp.status)
-                        continue
-                    text = await resp.text()
-                    # NEM12 files begin with "100," (header) or "200," (NMI record, no header).
-                    stripped = text.lstrip()
-                    if stripped.startswith("100,") or stripped.startswith("200,"):
-                        _LOGGER.debug("NEM12 download succeeded via %s", url)
-                        return text
-                    _LOGGER.debug(
-                        "NEM12 candidate %s returned 200 but content is not NEM12 "
-                        "(first 40 chars: %r)",
-                        url, text[:40],
-                    )
-            except aiohttp.ClientError as exc:
-                _LOGGER.debug("NEM12 candidate %s error: %s", url, exc)
 
         return None
 
