@@ -11,6 +11,7 @@ FRIENDLY_EXPORT = "AusNet {nmi} Energy Export"
 CONF_EMAIL = "email"
 CONF_PASSWORD = "password"
 CONF_NMI = "nmi"
+CONF_SESSION_COOKIE = "session_cookie"
 
 # How many days of history to backfill on initial setup
 CONF_HISTORY_DAYS = "history_days"

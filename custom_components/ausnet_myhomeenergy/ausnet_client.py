@@ -8,6 +8,7 @@ from datetime import date, timedelta
 from typing import Optional
 
 import aiohttp
+from yarl import URL
 
 from homeassistant.exceptions import HomeAssistantError
 
@@ -81,6 +82,11 @@ class AusNetClient:
         except aiohttp.ClientConnectionError as exc:
             raise AusNetAuthError(f"Cannot reach myHomeEnergy portal: {exc}") from exc
 
+        # Detect reCAPTCHA presence so we can give an actionable error later.
+        has_recaptcha = bool(
+            re.search(r"grecaptcha|g-recaptcha|recaptcha\.enterprise", html, re.I)
+        )
+
         # Extract __RequestVerificationToken if present.
         token_match = re.search(
             r'<input[^>]+name="__RequestVerificationToken"[^>]+value="([^"]*)"',
@@ -118,15 +124,56 @@ class AusNetClient:
 
         # Confirm the auth cookie was set.
         if not self._has_auth_cookie():
+            if has_recaptcha:
+                raise AusNetAuthError(
+                    "Login blocked by reCAPTCHA. To work around this: log in via "
+                    "your browser, open Developer Tools (F12) → Application → "
+                    "Cookies → myhomeenergy.com.au, copy the .ASPXAUTH cookie "
+                    "value, and paste it into the 'Session cookie' field when "
+                    "setting up this integration."
+                )
             raise AusNetAuthError(
                 "Login appeared to succeed but no session cookie was returned. "
-                "Your email or password may be incorrect, or the portal may have "
-                "added CAPTCHA protection that blocks automated login."
+                "Your email or password may be incorrect."
             )
 
     def _has_auth_cookie(self) -> bool:
         cookies = self._session.cookie_jar.filter_cookies(PORTAL_BASE)
         return ".ASPXAUTH" in {c.key for c in cookies.values()}
+
+    async def authenticate_with_cookie(self, cookie_value: str) -> None:
+        """Authenticate by injecting a pre-obtained .ASPXAUTH session cookie.
+
+        Use this when reCAPTCHA blocks the normal email/password login flow.
+        Obtain the value from your browser's Developer Tools → Application →
+        Cookies → myhomeenergy.com.au after a manual login.
+
+        Raises AusNetAuthError if the cookie is rejected by the portal.
+        """
+        self._session.cookie_jar.update_cookies(
+            {".ASPXAUTH": cookie_value},
+            URL(PORTAL_BASE),
+        )
+        # Verify the cookie by requesting the login page without following
+        # redirects. ASP.NET Forms Authentication redirects authenticated users
+        # away from the login URL; unauthenticated requests stay on the page.
+        try:
+            async with self._session.get(_LOGIN_URL, allow_redirects=False) as resp:
+                if resp.status in (301, 302, 303, 307, 308):
+                    return  # Redirected away from login page → authenticated
+                html = await resp.text()
+                if 'name="Password"' in html:
+                    raise AusNetAuthError(
+                        "Session cookie is invalid or expired. "
+                        "Log in via your browser, open Developer Tools (F12) → "
+                        "Application → Cookies → myhomeenergy.com.au, and copy "
+                        "a fresh .ASPXAUTH value."
+                    )
+                # 200 without the login form — assume authenticated
+        except AusNetAuthError:
+            raise
+        except aiohttp.ClientConnectionError as exc:
+            raise AusNetAuthError(f"Cannot reach myHomeEnergy portal: {exc}") from exc
 
     # ------------------------------------------------------------------
     # NEM12 download
