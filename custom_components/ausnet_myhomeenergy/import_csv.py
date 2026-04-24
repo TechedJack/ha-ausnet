@@ -157,7 +157,7 @@ def _hourly_aggregate(
     Uses timedelta arithmetic so DST days with 23 or 25 intervals are handled
     without hitting datetime's hour-must-be-0..23 constraint.
     """
-    if interval_len not in (15, 30, 60):
+    if interval_len not in (5, 15, 30, 60):
         raise ValueError(f"Unsupported interval length: {interval_len} minutes")
 
     result: Dict[dt.datetime, float] = {}

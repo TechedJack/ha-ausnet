@@ -197,54 +197,43 @@ class AusNetCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             raise UpdateFailed(f"Portal authentication failed: {exc}") from exc
 
         nmi = self._nmi
-        results: dict[str, Any] = {}
+        placeholder_nmi = nmi or "unknown"
 
-        for channel in _CHANNELS:
-            placeholder_nmi = nmi or "unknown"
-            stat_id = (
-                STAT_ID_EXPORT.format(nmi=placeholder_nmi)
-                if channel == "E2"
-                else STAT_ID_IMPORT.format(nmi=placeholder_nmi)
-            )
-            start, end = await self._fetch_date_range(stat_id)
-            _LOGGER.debug("AusNet: fetching %s for %s → %s", channel, start, end)
+        # Compute the widest date range needed across both channels so a single
+        # download covers all missing data (E1 and E2 are in the same file).
+        start_e1, end = await self._fetch_date_range(STAT_ID_IMPORT.format(nmi=placeholder_nmi))
+        start_e2, _   = await self._fetch_date_range(STAT_ID_EXPORT.format(nmi=placeholder_nmi))
+        start = min(start_e1, start_e2)
+        _LOGGER.debug("AusNet: fetching NEM12 for %s → %s", start, end)
 
-            # Download NEM12 CSV; re-authenticate once if the session expired.
-            nem12_text: str | None = None
+        # Download once; re-authenticate once if the session expired.
+        nem12_text: str | None = None
+        try:
+            nem12_text = await self._client.download_nem12(nmi, start, end)
+        except AusNetAuthError:
+            _LOGGER.debug("Session expired during download; re-authenticating")
+            self._authenticated = False
             try:
+                await self._ensure_authenticated()
                 nem12_text = await self._client.download_nem12(nmi, start, end)
-            except AusNetAuthError:
-                _LOGGER.debug("Session expired during download; re-authenticating")
-                self._authenticated = False
-                try:
-                    await self._ensure_authenticated()
-                    nem12_text = await self._client.download_nem12(nmi, start, end)
-                except (AusNetAuthError, AusNetDownloadError) as exc:
-                    raise UpdateFailed(
-                        f"Re-auth after session expiry failed: {exc}"
-                    ) from exc
-            except AusNetDownloadError as exc:
-                _LOGGER.warning("AusNet download error (%s): %s", channel, exc)
+            except (AusNetAuthError, AusNetDownloadError) as exc:
+                raise UpdateFailed(f"Re-auth after session expiry failed: {exc}") from exc
+        except AusNetDownloadError as exc:
+            _LOGGER.warning("AusNet download error: %s", exc)
 
-            if not nem12_text:
-                _LOGGER.info(
-                    "AusNet: NEM12 not available for channel %s "
-                    "(download endpoint not yet confirmed for this account).",
-                    channel,
-                )
-                results[channel] = "unavailable"
-                continue
+        if not nem12_text:
+            _LOGGER.info("AusNet: NEM12 download returned no data.")
+            return {ch: "unavailable" for ch in _CHANNELS}
 
+        results: dict[str, Any] = {}
+        for channel in _CHANNELS:
             try:
                 resolved_nmi = await self._write_stats_for_channel(nem12_text, channel, nmi)
-                # If we detected the NMI from the file and didn't have it yet, cache it.
                 if not self._nmi and resolved_nmi:
                     self._nmi = resolved_nmi
                 results[channel] = "ok"
             except ValueError as exc:
-                _LOGGER.debug(
-                    "AusNet: channel %s not in downloaded NEM12: %s", channel, exc
-                )
+                _LOGGER.debug("AusNet: channel %s not in NEM12: %s", channel, exc)
                 results[channel] = "not_found"
             except Exception as exc:  # noqa: BLE001
                 _LOGGER.error("AusNet: stat write failed for %s: %s", channel, exc)
