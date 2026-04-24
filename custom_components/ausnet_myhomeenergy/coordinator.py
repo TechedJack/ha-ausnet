@@ -2,12 +2,14 @@
 from __future__ import annotations
 
 import datetime as dt
+import functools
 import logging
 from typing import Any
 
 import aiohttp
 import pytz
 
+from homeassistant.components.recorder import get_instance
 from homeassistant.components.recorder.models import StatisticData, StatisticMetaData
 from homeassistant.components.recorder.statistics import (
     async_add_external_statistics,
@@ -90,9 +92,11 @@ class AusNetCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     # Statistics helpers
     # ------------------------------------------------------------------
 
-    def _last_stat_date(self, statistic_id: str) -> dt.date | None:
+    async def _last_stat_date(self, statistic_id: str) -> dt.date | None:
         """Return the date of the most recent recorded sample, or None."""
-        last = get_last_statistics(self.hass, 1, statistic_id, True, {"sum"})
+        last = await get_instance(self.hass).async_add_executor_job(
+            get_last_statistics, self.hass, 1, statistic_id, True, {"sum"}
+        )
         if not last or statistic_id not in last:
             return None
         ts = last[statistic_id][0].get("start")
@@ -100,37 +104,37 @@ class AusNetCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return None
         return dt_util.utc_from_timestamp(float(ts)).astimezone(_TZ).date()
 
-    def _fetch_date_range(self, statistic_id: str) -> tuple[dt.date, dt.date]:
+    async def _fetch_date_range(self, statistic_id: str) -> tuple[dt.date, dt.date]:
         """Return (start, end) date range to request for a channel.
 
         The portal lags by roughly one day so we cap end at yesterday.
         We overlap by 2 days so a partially-recorded previous day is filled.
         """
         end = dt.date.today() - dt.timedelta(days=1)
-        last = self._last_stat_date(statistic_id)
+        last = await self._last_stat_date(statistic_id)
         if last is None:
             start = end - dt.timedelta(days=DEFAULT_HISTORY_DAYS)
         else:
             start = last - dt.timedelta(days=2)
         return min(start, end), end
 
-    def _last_cumulative_sum(self, statistic_id: str) -> float:
-        last = get_last_statistics(self.hass, 1, statistic_id, True, {"sum"})
+    async def _last_cumulative_sum(self, statistic_id: str) -> float:
+        last = await get_instance(self.hass).async_add_executor_job(
+            get_last_statistics, self.hass, 1, statistic_id, True, {"sum"}
+        )
         if not last or statistic_id not in last:
             return 0.0
         return float(last[statistic_id][0].get("sum") or 0.0)
 
-    def _write_stats_for_channel(
+    async def _write_stats_for_channel(
         self, nem12_text: str, channel: str, nmi_hint: str
     ) -> str:
         """Parse NEM12 text and write statistics.  Returns the resolved NMI."""
-        nmi, interval_len, unit, day_values = _parse_nem12_text(
-            nem12_text, desired_channel=channel
+        nmi, interval_len, unit, day_values = await self.hass.async_add_executor_job(
+            functools.partial(_parse_nem12_text, nem12_text, desired_channel=channel)
         )
         if nmi_hint:
             nmi = nmi_hint
-
-        hourly = _hourly_aggregate(day_values, unit=unit, interval_len=interval_len)
 
         if channel == "E2":
             stat_id = STAT_ID_EXPORT.format(nmi=nmi)
@@ -139,7 +143,11 @@ class AusNetCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             stat_id = STAT_ID_IMPORT.format(nmi=nmi)
             friendly = FRIENDLY_IMPORT.format(nmi=nmi)
 
-        running = self._last_cumulative_sum(stat_id)
+        hourly = await self.hass.async_add_executor_job(
+            functools.partial(_hourly_aggregate, day_values, unit=unit, interval_len=interval_len)
+        )
+
+        running = await self._last_cumulative_sum(stat_id)
 
         samples: list[StatisticData] = []
         for local_hour, kwh in sorted(hourly.items()):
@@ -186,9 +194,7 @@ class AusNetCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 if channel == "E2"
                 else STAT_ID_IMPORT.format(nmi=placeholder_nmi)
             )
-            start, end = await self.hass.async_add_executor_job(
-                self._fetch_date_range, stat_id
-            )
+            start, end = await self._fetch_date_range(stat_id)
             _LOGGER.debug("AusNet: fetching %s for %s → %s", channel, start, end)
 
             # Download NEM12 CSV; re-authenticate once if the session expired.
@@ -217,11 +223,8 @@ class AusNetCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 results[channel] = "unavailable"
                 continue
 
-            # CPU-bound parsing + synchronous DB reads run in an executor thread.
             try:
-                resolved_nmi = await self.hass.async_add_executor_job(
-                    self._write_stats_for_channel, nem12_text, channel, nmi
-                )
+                resolved_nmi = await self._write_stats_for_channel(nem12_text, channel, nmi)
                 # If we detected the NMI from the file and didn't have it yet, cache it.
                 if not self._nmi and resolved_nmi:
                     self._nmi = resolved_nmi
