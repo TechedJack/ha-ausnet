@@ -248,7 +248,8 @@ class AusNetClient:
             async with self._session.get(_START_DOWNLOAD_URL, params=primary_params) as resp:
                 if resp.status == 200:
                     text = await resp.text()
-                    if text.lstrip().startswith("100,"):
+                    stripped = text.lstrip()
+                    if stripped.startswith("100,") or stripped.startswith("200,"):
                         _LOGGER.debug("NEM12 download succeeded via StartDownload")
                         return text
                     _LOGGER.debug(
@@ -273,8 +274,9 @@ class AusNetClient:
                         _LOGGER.debug("NEM12 candidate %s → HTTP %s", url, resp.status)
                         continue
                     text = await resp.text()
-                    # NEM12 files always begin with "100,"
-                    if text.lstrip().startswith("100,"):
+                    # NEM12 files begin with "100," (header) or "200," (NMI record, no header).
+                    stripped = text.lstrip()
+                    if stripped.startswith("100,") or stripped.startswith("200,"):
                         _LOGGER.debug("NEM12 download succeeded via %s", url)
                         return text
                     _LOGGER.debug(
