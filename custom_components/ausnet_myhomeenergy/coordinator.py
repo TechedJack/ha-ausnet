@@ -212,13 +212,13 @@ class AusNetCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # Download NEM12 CSV; re-authenticate once if the session expired.
             nem12_text: str | None = None
             try:
-                nem12_text = await self._client.download_nem12(nmi, start, end)
+                nem12_text = await self._client.download_nem12(nmi, start, end, channel=channel)
             except AusNetAuthError:
                 _LOGGER.debug("Session expired during download; re-authenticating")
                 self._authenticated = False
                 try:
                     await self._ensure_authenticated()
-                    nem12_text = await self._client.download_nem12(nmi, start, end)
+                    nem12_text = await self._client.download_nem12(nmi, start, end, channel=channel)
                 except (AusNetAuthError, AusNetDownloadError) as exc:
                     raise UpdateFailed(
                         f"Re-auth after session expiry failed: {exc}"

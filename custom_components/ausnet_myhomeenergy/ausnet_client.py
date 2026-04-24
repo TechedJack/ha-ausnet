@@ -223,6 +223,7 @@ class AusNetClient:
         nmi: str,
         start: date,
         end: date,
+        channel: str = "E1",
     ) -> Optional[str]:
         """Attempt to download a NEM12 CSV file for the given NMI and date range.
 
@@ -233,6 +234,7 @@ class AusNetClient:
                 "NMI": nmi,
                 "fileType": "NEM12",
                 "isDownload": "true",
+                "channel": channel,
             }
             async with self._session.get(_START_DOWNLOAD_URL, params=primary_params) as resp:
                 if resp.status == 200:
