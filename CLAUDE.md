@@ -22,7 +22,7 @@ custom_components/ausnet_myhomeenergy/
 ## Key design decisions
 
 - **Cookie jar**: `aiohttp.CookieJar(unsafe=True)` is required because the `.ASPXAUTH` cookie is issued for `.ausnetservices.com.au` while login is on `myhomeenergy.com.au`.
-- **NEM12 endpoint discovery**: Five candidate URLs are tried in order; the first that returns content starting with `"100,"` wins (`_NEM12_CANDIDATES` in `ausnet_client.py`).
+- **NEM12 download**: Uses `_START_DOWNLOAD_URL` (`/api/Sitecore/Dashboard/StartDownload`). The portal omits the NEM12 record-100 header and starts the file at record-200, so the validator accepts either `"100,"` or `"200,"` as the opening token.
 - **reCAPTCHA fallback**: When the portal blocks automated login, the user can paste their `.ASPXAUTH` cookie (from browser DevTools) into the optional "Session cookie" config field. `authenticate_with_cookie()` injects it and verifies with a login-page redirect check.
 - **Statistics**: External long-term statistics are written as cumulative kWh sums. Stat IDs follow the pattern `ausnet_myhomeenergy:ausnet_{nmi}_energy_import/export`.
 
@@ -49,9 +49,6 @@ There is no dedicated test suite. Use standard HA dev tools:
 pip install homeassistant
 python -m mypy custom_components/ausnet_myhomeenergy --ignore-missing-imports
 ```
-
-### Add a new NEM12 download endpoint
-Append to `_NEM12_CANDIDATES` in `ausnet_client.py`. No other changes needed.
 
 ### Change the update interval
 Edit `UPDATE_INTERVAL_HOURS` in `const.py`.
