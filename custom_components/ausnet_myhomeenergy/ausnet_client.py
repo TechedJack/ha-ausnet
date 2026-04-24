@@ -204,6 +204,7 @@ class AusNetClient:
         # Try patterns that Sitecore/AusNet portals commonly use to embed the NMI.
         # Update these if the portal HTML structure changes.
         for pattern in [
+            r'class="selectedNMI[^"]*"\s*>([A-Z0-9]{10,11})<',
             r'customerNMI["\']?\s*[:=]\s*["\']([A-Z0-9]{10,11})',
             r'data-nmi=["\']([A-Z0-9]{10,11})["\']',
             r'"NMI"\s*:\s*"([A-Z0-9]{10,11})"',
