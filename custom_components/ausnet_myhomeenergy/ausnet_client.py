@@ -22,7 +22,10 @@ _LOGIN_URL = f"{PORTAL_BASE}/en"
 _API_BASE = f"{PORTAL_BASE}/api/Sitecore/Dashboard"
 _CHART_URL = "https://www.ausnetservices.com.au/api/Sitecore/Dashboard/GetDataForChart"
 
-# NEM12 download: tried in order; the first that returns valid NEM12 content wins.
+# Primary NEM12 download endpoint discovered via browser DevTools.
+_START_DOWNLOAD_URL = f"{_API_BASE}/StartDownload"
+
+# Legacy candidates tried as fallback; the first that returns valid NEM12 content wins.
 _NEM12_CANDIDATES = [
     f"{_API_BASE}/GetDownloadData",
     f"{_API_BASE}/DownloadIntervalData",
@@ -190,15 +193,37 @@ class AusNetClient:
         Tries each candidate endpoint in order.  Returns the raw CSV text if a
         valid NEM12 file is found, or ``None`` if all candidates fail.
         """
-        params: dict[str, str] = {
+        # Try the confirmed endpoint first.
+        try:
+            primary_params: dict[str, str] = {
+                "NMI": nmi,
+                "fileType": "NEM12",
+                "isDownload": "true",
+            }
+            async with self._session.get(_START_DOWNLOAD_URL, params=primary_params) as resp:
+                if resp.status == 200:
+                    text = await resp.text()
+                    if text.lstrip().startswith("100,"):
+                        _LOGGER.debug("NEM12 download succeeded via StartDownload")
+                        return text
+                    _LOGGER.debug(
+                        "StartDownload returned 200 but content is not NEM12 "
+                        "(first 40 chars: %r)", text[:40],
+                    )
+                else:
+                    _LOGGER.debug("StartDownload → HTTP %s", resp.status)
+        except aiohttp.ClientError as exc:
+            _LOGGER.debug("StartDownload error: %s", exc)
+
+        # Fall back to legacy candidates with date-range parameters.
+        legacy_params: dict[str, str] = {
             "customerNMI": nmi,
             "startdate": start.strftime("%Y%m%d"),
             "enddate": end.strftime("%Y%m%d"),
         }
-
         for url in _NEM12_CANDIDATES:
             try:
-                async with self._session.get(url, params=params) as resp:
+                async with self._session.get(url, params=legacy_params) as resp:
                     if resp.status != 200:
                         _LOGGER.debug("NEM12 candidate %s → HTTP %s", url, resp.status)
                         continue
