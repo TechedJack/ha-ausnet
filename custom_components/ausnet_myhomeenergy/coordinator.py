@@ -24,6 +24,7 @@ from .const import (
     CONF_EMAIL,
     CONF_NMI,
     CONF_PASSWORD,
+    CONF_SESSION_COOKIE,
     DEFAULT_HISTORY_DAYS,
     DOMAIN,
     FRIENDLY_EXPORT,
@@ -55,6 +56,7 @@ class AusNetCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._email: str = entry_data[CONF_EMAIL]
         self._password: str = entry_data[CONF_PASSWORD]
         self._nmi: str = entry_data.get(CONF_NMI, "").strip()
+        self._session_cookie: str = entry_data.get(CONF_SESSION_COOKIE, "").strip()
 
         # Dedicated session with unsafe cookie jar so the .ASPXAUTH cookie
         # is stored and forwarded correctly.
@@ -78,7 +80,10 @@ class AusNetCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     async def _ensure_authenticated(self) -> None:
         if not self._authenticated:
-            await self._client.authenticate()
+            if self._session_cookie:
+                await self._client.authenticate_with_cookie(self._session_cookie)
+            else:
+                await self._client.authenticate()
             self._authenticated = True
 
     # ------------------------------------------------------------------
